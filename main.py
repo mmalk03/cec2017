@@ -83,7 +83,7 @@ def plot_specific_comparison(df, function, dimensions):
     other_algorithms = [algorithm for algorithm in algorithms if "gapso" not in algorithm.lower()]
 
     ncols = 2
-    fig, axs = plt.subplots(nrows=2, ncols=ncols)
+    fig, axs = plt.subplots(nrows=2, ncols=ncols, figsize=(6.4 * 1.5, 4.8 * 1.5))
     axs = np.squeeze(np.reshape(axs, (1, -1)))
 
     for idx in range(ncols):
@@ -96,7 +96,8 @@ def plot_specific_comparison(df, function, dimensions):
                      ax=axs[idx],
                      palette=algorithms_colors,
                      hue_order=algorithms_subset)
-        axs[idx].set_xlim(0.01, 0.1)
+        # axs[idx].set_xlim(0.01, 0.1)
+        axs[idx].legend(fontsize='x-small', loc=1)
     fig.suptitle(query)
 
     plt.savefig(f'comparison_fun_{function}_dim_{dimensions}.pdf', dpi=300)
@@ -128,6 +129,10 @@ def main():
     arg_parse.add_argument('--gapso-logs-path', type=str,
                            help='path to GAPSO files for parsing',
                            default=None)
+    arg_parse.add_argument('--without-score',
+                           action='store_true',
+                           help='do not calculate and print overall score',
+                           default=False)
 
     args = arg_parse.parse_args()
 
@@ -135,8 +140,9 @@ def main():
     if args.gapso_logs_path:
         append_logs_from_gapso(df, args.gapso_logs_path)
 
-    scores = calculate_scores(df)
-    print(scores.sort_values(ascending=False))
+    if not args.without_score:
+        scores = calculate_scores(df)
+        print(scores.sort_values(ascending=False))
 
     for function in args.functions:
         for dimensions in args.dimensions:
