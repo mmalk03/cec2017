@@ -71,12 +71,34 @@ def load_data_frame():
 
 def plot_specific_comparison(df, function, dimensions):
     query = f"function == '{function}' and dimensions == '{dimensions}'"
-    fig, ax = plt.subplots()
-    sns.lineplot('evaluations', 'error', hue='algorithm',
-                 data=df.query(query),
-                 ax=ax)
-    ax.set_xlim(0.01, 0.1)
-    ax.set_title(query)
+    data = df.query(query)
+
+    algorithms = data['algorithm'].unique().tolist()
+
+    palette = sns.color_palette(n_colors=len(algorithms))
+
+    algorithms_colors = {algorithm: palette[idx] for idx, algorithm in enumerate(algorithms)}
+
+    gapso_algorithms = [algorithm for algorithm in algorithms if "gapso" in algorithm.lower()]
+    other_algorithms = [algorithm for algorithm in algorithms if "gapso" not in algorithm.lower()]
+
+    ncols = 2
+    fig, axs = plt.subplots(nrows=2, ncols=ncols)
+    axs = np.squeeze(np.reshape(axs, (1, -1)))
+
+    for idx in range(ncols):
+        axs[idx].set_xticks([])
+
+    for idx, other_algorithms_subset in enumerate(np.array_split(other_algorithms, len(axs))):
+        algorithms_subset = gapso_algorithms + other_algorithms_subset.tolist()
+        sns.lineplot('evaluations', 'error', hue='algorithm',
+                     data=data[data["algorithm"].isin(algorithms_subset)],
+                     ax=axs[idx],
+                     palette=algorithms_colors,
+                     hue_order=algorithms_subset)
+        axs[idx].set_xlim(0.01, 0.1)
+    fig.suptitle(query)
+
     plt.savefig(f'comparison_fun_{function}_dim_{dimensions}.pdf', dpi=300)
     plt.show()
 
