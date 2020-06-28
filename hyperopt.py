@@ -1,47 +1,86 @@
-import os
+import io
+import re
+import subprocess
 from argparse import ArgumentParser
-from datetime import datetime
 
+import joblib
 import numpy as np
 import optuna
+import pandas as pd
 
 
 class GapsoTrial:
-    def __init__(self, dimensions, functions, repeats):
+    def __init__(self, dimensions, functions, repeats, working_directory):
         self._dimensions = dimensions
         self._functions = functions
         self._repeats = repeats
+        self._working_directory = working_directory
+        self._num_parallel_repeats = 5
 
     def objective(self, trial: optuna.Trial):
         stagnation = trial.suggest_categorical('stagnation', [10, 20, 40])
         collapse = trial.suggest_categorical('collapse', [1e-4, 1e-3, 1e-2])
         # collapse_type = trial.suggest_categorical('collapse_type', ['LINEAR', 'VARIANCE'])
-        results_dir = datetime.now().strftime('%Y%m%d_%H%M%S')
-        self._run_gapso(stagnation, collapse, results_dir)
-        # TODO: read results and calculate score similarly as in main.py
-        multiplier = trial.suggest_int('multiplier', 4, 32, 4)
-        return np.sum(self._dimensions) * multiplier + np.sum(self._functions) * multiplier
+        score = self._run_gapso(stagnation, collapse)
+        return score
 
-    def _run_gapso(self, stagnation, collapse, results_dir):
-        """ Runs GAPSO appropriate number of times using queue.sh script and waits till it finishes """
+    def _run_gapso(self, stagnation, collapse):
+        dfs = []
+        for dimension in self._dimensions:
+            for function in self._functions:
+                # TODO: set number of parallel jobs depending on dimension
+                errors = joblib.Parallel(n_jobs=self._num_parallel_repeats)(
+                    joblib.delayed(self._run_gapso_single_repeat)(
+                        dimension, function, stagnation, collapse
+                    )
+                    for _ in range(self._repeats)
+                )
+                errors_padded = np.zeros((14, self._repeats))
+                for i, v in enumerate(errors):
+                    errors_padded[:len(v), i] = v
+                df = pd.DataFrame(errors_padded)
+                df['evaluations'] = [0.01, 0.02, 0.03, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+                df = df.melt(id_vars=['evaluations'], var_name='repeat', value_name='error')
+                df['dimensions'] = dimension
+                df['function'] = function
+                dfs.append(df)
+        df = pd.concat(dfs)
+        return self._calculate_score(df)
+
+    def _run_gapso_single_repeat(self, dimension, function, stagnation, collapse):
         command = ' '.join([
-            './queue.sh',
-            f"--dimensions {self._dimensions}",
-            f"--functions {self._functions}",
-            f"--repeats {self._repeats}",
-            f"--stagnation {stagnation}",
-            f"--collapse {collapse}",
-            f"--results-dir {results_dir}",
+            f"java -jar {self._working_directory}/gapso-cec2017-experiment-1.0.0.jar",
+            f"--cec2017.dimensions {dimension}",
+            f"--cec2017.function {function}",
+            '--cec2017.repeats 1',
+            f"--gapso.restarts.stagnation {stagnation}",
+            f"--gapso.restarts.collapse {collapse}"
         ])
-        os.system(command)
+        process = subprocess.Popen(command.split(), cwd=self._working_directory, stdout=subprocess.PIPE)
+        lines = [line for line in io.TextIOWrapper(process.stdout) if line.startswith('[StdoutCec2017Logger]')]
+        return [float(re.findall(r"value: (.*)\n", line)[0]) for line in lines]
+
+    def _calculate_score(self, df: pd.DataFrame):
+        coefficients = []
+        if 10 in self._dimensions: coefficients.append(0.1)
+        if 30 in self._dimensions: coefficients.append(0.2)
+        if 50 in self._dimensions: coefficients.append(0.3)
+        if 100 in self._dimensions: coefficients.append(0.4)
+        # TODO: why original score only looks at final values?
+        sum_of_errors = df.query('function != "2"').query('evaluations == 1.00')
+        sum_of_errors = sum_of_errors.groupby(['dimensions', 'function'])['error'].mean()
+        sum_of_errors = sum_of_errors.groupby(['dimensions']).sum()
+        sum_of_errors = sum_of_errors.groupby('dimensions').aggregate(lambda x: np.sum(x * coefficients))
+        return (1 - (sum_of_errors - sum_of_errors.min()) / (sum_of_errors + 1e-8))
 
 
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument('--dimensions', type=str, default='10,30', help='Comma-separated list of dimensions')
     parser.add_argument('--functions', type=str, default='4,5,6', help='Comma-separated list of functions')
-    parser.add_argument('--repeats', type=int, default=10, help='Number of repeats for each function and dimension pair')
-    args = parser.parse_args([])
+    parser.add_argument('--repeats', type=int, default=3, help='Number of repeats for each function and dimension pair')
+    parser.add_argument('--gapso-jar-directory', type=str, default='basic-pso-de-hybrid/cec2017/target', help='Directory with jar and properties')
+    args = parser.parse_args()
     args.dimensions = [int(d) for d in args.dimensions.split(',')]
     args.functions = [int(f) for f in args.functions.split(',')]
     return args
@@ -49,13 +88,11 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    trial = GapsoTrial(args.dimensions, args.functions)
-    search_space = {'multiplier': [4, 8, 16, 20, 24, 28, 32]}
+    trial = GapsoTrial(args.dimensions, args.functions, args.repeats, args.gapso_jar_directory)
+    search_space = {
+        'stagnation': [10, 20, 40],
+        'collapse': [1e-4, 1e-3, 1e-2]
+    }
     sampler = optuna.samplers.GridSampler(search_space)
     study = optuna.create_study(sampler=sampler)
-    study.optimize(trial.objective, n_trials=7)
-
-# TODO:
-# - add collapse and stagnation command line arguments to Java runner
-# - add results directory command line argument to Java runner, which specifies a directory where CEC2017 logs should be saved
-# - modify queue.sh such that it doesn't run all functions, dimensions and repeats in parallel
+    study.optimize(trial.objective, n_trials=9)
