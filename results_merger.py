@@ -23,9 +23,10 @@ def merge_results(from_paths, to_path):
     df = pd.DataFrame(get_filename_path_tuple_from_path(from_paths), columns=['filename', 'path'])
     for filename, row in df.groupby('filename').agg(lambda x: list(x)).iterrows():
         paths = row['path']
+
         df_local = pd.concat([pd.read_csv(str(path), sep=r"\s+", header=None) for path in paths], axis=1)
 
-        df_local.to_csv(os.path.join(to_path, filename))
+        df_local.to_csv(os.path.join(to_path, filename), header=False, index=False, sep="\t")
         repeats_count[filename] = df_local.shape[1]
 
     repeats_count = [[k, v] for k, v in sorted(repeats_count.items(), key=operator.itemgetter(1))]
