@@ -15,7 +15,6 @@ class GapsoTrial:
         self._functions = functions
         self._repeats = repeats
         self._working_directory = working_directory
-        self._num_parallel_repeats = 5
 
     def objective(self, trial: optuna.Trial):
         stagnation = trial.suggest_categorical('stagnation', [10, 20, 40])
@@ -26,16 +25,16 @@ class GapsoTrial:
 
     def _run_gapso(self, stagnation, collapse):
         dfs = []
-        for dimension in self._dimensions:
+        for dimension, repeats in zip(self._dimensions, self._repeats):
             for function in self._functions:
-                # TODO: set number of parallel jobs depending on dimension
-                errors = joblib.Parallel(n_jobs=self._num_parallel_repeats)(
+                num_jobs = self._num_parallel_repeats(dimension)
+                errors = joblib.Parallel(n_jobs=num_jobs)(
                     joblib.delayed(self._run_gapso_single_repeat)(
                         dimension, function, stagnation, collapse
                     )
-                    for _ in range(self._repeats)
+                    for _ in range(repeats)
                 )
-                errors_padded = np.zeros((14, self._repeats))
+                errors_padded = np.zeros((14, repeats))
                 for i, v in enumerate(errors):
                     errors_padded[:len(v), i] = v
                 df = pd.DataFrame(errors_padded)
@@ -66,23 +65,33 @@ class GapsoTrial:
         if 30 in self._dimensions: coefficients.append(0.2)
         if 50 in self._dimensions: coefficients.append(0.3)
         if 100 in self._dimensions: coefficients.append(0.4)
-        # TODO: why original score only looks at final values?
         sum_of_errors = df.query('function != "2"').query('evaluations == 1.00')
         sum_of_errors = sum_of_errors.groupby(['dimensions', 'function'])['error'].mean()
         sum_of_errors = sum_of_errors.groupby(['dimensions']).sum()
-        sum_of_errors = sum_of_errors.groupby('dimensions').aggregate(lambda x: np.sum(x * coefficients))
-        return (1 - (sum_of_errors - sum_of_errors.min()) / (sum_of_errors + 1e-8))
+        return np.sum(sum_of_errors * coefficients)
+
+    @staticmethod
+    def _num_parallel_repeats(dimensions: int):
+        if dimensions == 10:
+            return 16
+        elif dimensions == 30:
+            return 8
+        elif dimensions == 50:
+            return 8
+        else:
+            return 4
 
 
 def parse_args():
     parser = ArgumentParser()
     parser.add_argument('--dimensions', type=str, default='10,30', help='Comma-separated list of dimensions')
     parser.add_argument('--functions', type=str, default='4,5,6', help='Comma-separated list of functions')
-    parser.add_argument('--repeats', type=int, default=3, help='Number of repeats for each function and dimension pair')
+    parser.add_argument('--repeats', type=str, default='16,8', help='Comma-separated number of repeats for corresponding dimension')
     parser.add_argument('--gapso-jar-directory', type=str, default='basic-pso-de-hybrid/cec2017/target', help='Directory with jar and properties')
     args = parser.parse_args()
     args.dimensions = [int(d) for d in args.dimensions.split(',')]
     args.functions = [int(f) for f in args.functions.split(',')]
+    args.repeats = [int(r) for r in args.repeats.split(',')]
     return args
 
 
