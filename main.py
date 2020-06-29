@@ -66,21 +66,29 @@ def load_data_frame():
             results += [result_table]
     df = pd.concat(results, ignore_index=True)
     df['error'] = df.apply(lambda row: 0.0 if row['error'] < 1e-8 else row['error'], axis=1)
-    df.to_pickle(CACHE_FILE)
+    df.to_pckle(CACHE_FILE)
+
+    return df
 
 
-def plot_specific_comparison(df, function, dimensions):
+def plot_specific_comparison(df, function, dimensions, only_save=False, scores=None):
     query = f"function == '{function}' and dimensions == '{dimensions}'"
     data = df.query(query)
 
-    algorithms = data['algorithm'].unique().tolist()
-
-    palette = sns.color_palette(n_colors=len(algorithms))
-
-    algorithms_colors = {algorithm: palette[idx] for idx, algorithm in enumerate(algorithms)}
+    if scores is not None:
+        algorithms = scores.sort_values(ascending=False).index.tolist()
+    else:
+        algorithms = data['algorithm'].unique().tolist()
 
     gapso_algorithms = [algorithm for algorithm in algorithms if "gapso" in algorithm.lower()]
     other_algorithms = [algorithm for algorithm in algorithms if "gapso" not in algorithm.lower()]
+
+    palette = sns.color_palette(palette="Paired", n_colors=len(other_algorithms))
+
+    other_algorithms_colors = {algorithm: palette[idx % ((len(other_algorithms) // 2) + 1) * 2  + (1 if idx > (len(other_algorithms) // 2) else 0)] for idx, algorithm in enumerate(other_algorithms)}
+    gapso_algorithms_colors = {algorithm: (0., 0., 0.) for algorithm in gapso_algorithms}
+
+    algorithms_colors = {**other_algorithms_colors, **gapso_algorithms_colors}
 
     ncols = 2
     fig, axs = plt.subplots(nrows=2, ncols=ncols, figsize=(6.4 * 1.5, 4.8 * 1.5))
@@ -89,6 +97,8 @@ def plot_specific_comparison(df, function, dimensions):
     for idx in range(ncols):
         axs[idx].set_xticks([])
 
+    max_error = data['error'].quantile(0.70)
+    min_error = data['error'].min()
     for idx, other_algorithms_subset in enumerate(np.array_split(other_algorithms, len(axs))):
         algorithms_subset = gapso_algorithms + other_algorithms_subset.tolist()
         sns.lineplot('evaluations', 'error', hue='algorithm',
@@ -97,11 +107,19 @@ def plot_specific_comparison(df, function, dimensions):
                      palette=algorithms_colors,
                      hue_order=algorithms_subset)
         # axs[idx].set_xlim(0.01, 0.1)
+        axs[idx].set_ylim(min_error, max_error)
         axs[idx].legend(fontsize='x-small', loc=1)
     fig.suptitle(query)
 
-    plt.savefig(f'comparison_fun_{function}_dim_{dimensions}.pdf', dpi=300)
-    plt.show()
+    directory = f"plots/comparison/dim_{dimensions}"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    plt.savefig(os.path.join(directory, f'fun_{function}_dim_{dimensions}.pdf'), dpi=300)
+
+    if not only_save:
+        plt.show()
+
+    plt.close()
 
 
 def plot_overall_comparison(df):
@@ -129,9 +147,17 @@ def main():
     arg_parse.add_argument('--gapso-logs-path', type=str,
                            help='path to GAPSO files for parsing',
                            default=None)
-    arg_parse.add_argument('--without-score',
+    arg_parse.add_argument('--without-score-print',
                            action='store_true',
-                           help='do not calculate and print overall score',
+                           help='do not print overall score',
+                           default=False)
+    arg_parse.add_argument('--without-plots',
+                           action='store_true',
+                           help='do not save or show any plot',
+                           default=False)
+    arg_parse.add_argument('--only-save',
+                           action='store_true',
+                           help='do not show plot, only save as .pdf',
                            default=False)
 
     args = arg_parse.parse_args()
@@ -140,13 +166,14 @@ def main():
     if args.gapso_logs_path:
         append_logs_from_gapso(df, args.gapso_logs_path)
 
-    if not args.without_score:
-        scores = calculate_scores(df)
+    scores = calculate_scores(df)
+    if not args.without_score_print:
         print(scores.sort_values(ascending=False))
 
-    for function in args.functions:
-        for dimensions in args.dimensions:
-            plot_specific_comparison(df, function, dimensions)
+    if not args.without_plots:
+        for function in tqdm(args.functions, position=0):
+            for dimensions in tqdm(args.dimensions, position=1):
+                plot_specific_comparison(df, function, dimensions, only_save=args.only_save, scores=scores)
 
     # plot_overall_comparison(df)
 
