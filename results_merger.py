@@ -3,7 +3,32 @@ import operator
 import os
 from pathlib import Path
 import pandas as pd
+from pandas.core.dtypes.missing import array_equivalent
 from tabulate import tabulate
+
+
+def duplicate_columns(frame):
+    """
+    Source: https://stackoverflow.com/a/32961145/1625856
+    """
+    groups = frame.columns.to_series().groupby(frame.dtypes).groups
+    dups = []
+
+    for t, v in groups.items():
+
+        cs = frame[v].columns
+        vs = frame[v]
+        lcs = len(cs)
+
+        for i in range(lcs):
+            ia = vs.iloc[:,i].values
+            for j in range(i+1, lcs):
+                ja = vs.iloc[:, j].values
+                if array_equivalent(ia, ja):
+                    dups.append(cs[i])
+                    break
+
+    return dups
 
 
 def get_filename_path_tuple_from_path(paths):
@@ -25,6 +50,9 @@ def merge_results(from_paths, to_path):
         paths = row['path']
 
         df_local = pd.concat([pd.read_csv(str(path), sep=r"\s+", header=None) for path in paths], axis=1)
+
+        duplicates = duplicate_columns(df_local)
+        df_local = df_local.drop(duplicates, axis=1)
 
         df_local.to_csv(os.path.join(to_path, filename), header=False, index=False, sep="\t")
         repeats_count[filename] = df_local.shape[1]
