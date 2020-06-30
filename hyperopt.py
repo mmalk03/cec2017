@@ -1,7 +1,9 @@
 import io
+import os
 import re
 import subprocess
 from argparse import ArgumentParser
+from datetime import datetime
 
 import joblib
 import numpy as np
@@ -15,15 +17,16 @@ class GapsoTrial:
         self._functions = functions
         self._repeats = repeats
         self._working_directory = working_directory
+        self._output_directory = datetime.now().strftime('%Y%m%d_%H%M%S')
 
     def objective(self, trial: optuna.Trial):
         stagnation = trial.suggest_categorical('stagnation', [10, 20, 40])
         collapse = trial.suggest_categorical('collapse', [1e-4, 1e-3, 1e-2])
         # collapse_type = trial.suggest_categorical('collapse_type', ['LINEAR', 'VARIANCE'])
-        score = self._run_gapso(stagnation, collapse)
+        score = self._run_gapso(stagnation, collapse, trial.number)
         return score
 
-    def _run_gapso(self, stagnation, collapse):
+    def _run_gapso(self, stagnation, collapse, trial_number):
         dfs = []
         for dimension, repeats in zip(self._dimensions, self._repeats):
             for function in self._functions:
@@ -38,6 +41,13 @@ class GapsoTrial:
                 for i, v in enumerate(errors):
                     errors_padded[:len(v), i] = v
                 df = pd.DataFrame(errors_padded)
+                filename = os.path.join(
+                    self._output_directory,
+                    f"trial{trial_number}_stagnation{stagnation}_collapse{collapse}",
+                    f"fun{function}_dim{dimension}_rep{repeats}.txt"
+                )
+                os.makedirs(os.path.dirname(filename), exist_ok=True)
+                df.to_csv(filename, sep=' ', index=False, header=False)
                 df['evaluations'] = [0.01, 0.02, 0.03, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
                 df = df.melt(id_vars=['evaluations'], var_name='repeat', value_name='error')
                 df['dimensions'] = dimension
