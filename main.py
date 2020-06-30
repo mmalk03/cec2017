@@ -66,7 +66,7 @@ def load_data_frame():
             results += [result_table]
     df = pd.concat(results, ignore_index=True)
     df['error'] = df.apply(lambda row: 0.0 if row['error'] < 1e-8 else row['error'], axis=1)
-    df.to_pckle(CACHE_FILE)
+    df.to_pickle(CACHE_FILE)
 
     return df
 
