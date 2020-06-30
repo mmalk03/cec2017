@@ -8,17 +8,26 @@ import seaborn as sns
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
+from utils import dir_path
+
 CACHE_FILE = 'data.pkl'
+RESULT_FILENAME_PATTERN = re.compile(r"([\w_-]+)_(\d{1,3})_(\d{1,3})\.(?:txt|csv)")
 
 
 def calculate_scores(df: pd.DataFrame):
     sum_of_errors = df.query('function != "2"').query('evaluations == 1.00')
+    not_complete_results = sum_of_errors[['algorithm', 'dimensions', 'function']].drop_duplicates().groupby('algorithm').count()
+    not_complete_results = not_complete_results[not_complete_results != not_complete_results.max()].dropna()
+    not_complete_results_algorithms = not_complete_results.index.tolist()
+
+    sum_of_errors = sum_of_errors[~sum_of_errors['algorithm'].isin(not_complete_results_algorithms)]
     sum_of_errors = sum_of_errors.groupby(['algorithm', 'dimensions', 'function'])['error'].mean()
     sum_of_errors = sum_of_errors.groupby(['algorithm', 'dimensions']).sum()
     sum_of_errors = sum_of_errors.groupby('algorithm').aggregate(lambda x: np.sum(x * [0.1, 0.2, 0.3, 0.4]))
     scores_1 = (1 - (sum_of_errors - sum_of_errors.min()) / sum_of_errors) * 50
 
     sum_of_ranks = df.query('function != "2"').query('evaluations == 1.00')
+    sum_of_ranks = sum_of_ranks[~sum_of_ranks['algorithm'].isin(not_complete_results_algorithms)]
     sum_of_ranks = sum_of_ranks.groupby(['algorithm', 'dimensions', 'function'])['error'].mean()
     sum_of_ranks = sum_of_ranks.reset_index()
 
@@ -42,42 +51,47 @@ def load_data_frame():
     if os.path.exists(CACHE_FILE):
         return pd.read_pickle(CACHE_FILE)
 
-    result_filename_pattern = re.compile(r"([\w_-]+)_(\d{1,3})_(\d{1,3})\.(?:txt|csv)")
     directory = 'data'
     results = []
     for paper_id in os.listdir(directory):
         paper_dir = os.path.join(directory, paper_id)
-        for f in tqdm(os.listdir(paper_dir), desc=paper_id):
-            matches = re.findall(result_filename_pattern, f)
-            if paper_id == 'E-17322':  # they messed up filenames
-                dimensions = matches[0][1]
-                function_name = matches[0][2]
-            else:
-                function_name = matches[0][1]
-                dimensions = matches[0][2]
-            absolute_path = os.path.join(paper_dir, f)
-            if paper_id == '17420':  # they messed up separator
-                result_table = pd.read_table(absolute_path, header=None, sep=',')
-            elif paper_id == 'E-17260':  # they messed up everything
-                result_table = pd.read_table(absolute_path, skiprows=1, header=None, sep='\s?,\s?').drop(0, axis=1)
-                result_table.columns = list(range(len(result_table.columns)))
-            else:
-                result_table = pd.read_table(absolute_path, header=None, sep='\s+')
-            result_table = result_table.transpose().reset_index()
-            result_table.columns = ['run'] + [0.01, 0.02, 0.03, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-            result_table = result_table.melt(id_vars=['run'], var_name='evaluations', value_name='error')
-            result_table['evaluations'] = pd.to_numeric(result_table['evaluations'])
-            result_table['paper_id'] = paper_id
-            result_table['algorithm'] = matches[0][0]
-            result_table['function'] = function_name
-            result_table['dimensions'] = int(dimensions)
-            result_table['absolute_path'] = absolute_path
-            results += [result_table]
+        results.extend(get_results_from_dir(paper_dir, paper_id))
     df = pd.concat(results, ignore_index=True)
     df['error'] = df.apply(lambda row: 0.0 if row['error'] < 1e-8 else row['error'], axis=1)
     df.to_pickle(CACHE_FILE)
 
     return df
+
+
+def get_results_from_dir(path, paper_id):
+    results = []
+    for f in tqdm(os.listdir(path), desc=paper_id):
+        matches = re.findall(RESULT_FILENAME_PATTERN, f)
+        if paper_id == 'E-17322':  # they messed up filenames
+            dimensions = matches[0][1]
+            function_name = matches[0][2]
+        else:
+            function_name = matches[0][1]
+            dimensions = matches[0][2]
+        absolute_path = os.path.join(path, f)
+        if paper_id == '17420':  # they messed up separator
+            result_table = pd.read_table(absolute_path, header=None, sep=',')
+        elif paper_id == 'E-17260':  # they messed up everything
+            result_table = pd.read_table(absolute_path, skiprows=1, header=None, sep='\s?,\s?').drop(0, axis=1)
+            result_table.columns = list(range(len(result_table.columns)))
+        else:
+            result_table = pd.read_table(absolute_path, header=None, sep='\s+')
+        result_table = result_table.transpose().reset_index()
+        result_table.columns = ['run'] + [0.01, 0.02, 0.03, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+        result_table = result_table.melt(id_vars=['run'], var_name='evaluations', value_name='error')
+        result_table['evaluations'] = pd.to_numeric(result_table['evaluations'])
+        result_table['paper_id'] = paper_id
+        result_table['algorithm'] = matches[0][0]
+        result_table['function'] = function_name
+        result_table['dimensions'] = int(dimensions)
+        result_table['absolute_path'] = absolute_path
+        results += [result_table]
+    return results
 
 
 def plot_specific_comparison(df, function, dimensions, only_save=False, scores=None):
@@ -89,13 +103,15 @@ def plot_specific_comparison(df, function, dimensions, only_save=False, scores=N
     else:
         algorithms = data['algorithm'].unique().tolist()
 
+    algorithms += list(set(data['algorithm'].unique()) - set(algorithms))
+
     gapso_algorithms = [algorithm for algorithm in algorithms if "gapso" in algorithm.lower()]
     other_algorithms = [algorithm for algorithm in algorithms if "gapso" not in algorithm.lower()]
 
     palette = sns.color_palette(palette="Paired", n_colors=len(other_algorithms))
 
     other_algorithms_colors = {algorithm: palette[idx % ((len(other_algorithms) // 2) + 1) * 2  + (1 if idx > (len(other_algorithms) // 2) else 0)] for idx, algorithm in enumerate(other_algorithms)}
-    gapso_algorithms_colors = {algorithm: (0., 0., 0.) for algorithm in gapso_algorithms}
+    gapso_algorithms_colors = {algorithm: (idx * 1. / len(gapso_algorithms), idx * 1.0 / len(gapso_algorithms), idx * 1.0 / len(gapso_algorithms)) for idx, algorithm in enumerate(gapso_algorithms)}
 
     algorithms_colors = {**other_algorithms_colors, **gapso_algorithms_colors}
 
@@ -120,7 +136,7 @@ def plot_specific_comparison(df, function, dimensions, only_save=False, scores=N
         axs[idx].legend(fontsize='x-small', loc=1)
     fig.suptitle(query)
 
-    directory = f"plots/comparison/dim_{dimensions}"
+    directory = f"comparison/dim_{dimensions}"
     if not os.path.exists(directory):
         os.makedirs(directory)
     plt.savefig(os.path.join(directory, f'fun_{function}_dim_{dimensions}.pdf'), dpi=300)
@@ -138,9 +154,20 @@ def plot_overall_comparison(df):
     plt.savefig('comparison.pdf', dpi=300)
 
 
-def append_logs_from_gapso(df, gapso_logs_path):
-    # for filename in glob(os.path.join(gapso_logs_path, ""))
-    pass
+def append_logs_online(df, additional_results_paths, rename_additional_results_algorithms):
+    if len(rename_additional_results_algorithms) != len(additional_results_paths):
+        rename_additional_results_algorithms = [None] * len(additional_results_paths)
+
+    results = []
+    for (path, algorithm) in zip(additional_results_paths, rename_additional_results_algorithms):
+        results_local = get_results_from_dir(path, "M-GAPSO")
+
+        if algorithm is not None:
+            for df_result in results_local:
+                df_result['algorithm'] = algorithm
+
+        results.extend(results_local)
+    return df.append(pd.concat(results, ignore_index=True))
 
 
 def main():
@@ -153,9 +180,6 @@ def main():
     arg_parse.add_argument('--dimensions', type=int, nargs='+',
                            help='dimensions for which do plots',
                            default=[10, 30, 50, 100])
-    arg_parse.add_argument('--gapso-logs-path', type=str,
-                           help='path to GAPSO files for parsing',
-                           default=None)
     arg_parse.add_argument('--without-score-print',
                            action='store_true',
                            help='do not print overall score',
@@ -168,12 +192,16 @@ def main():
                            action='store_true',
                            help='do not show plot, only save as .pdf',
                            default=False)
+    arg_parse.add_argument('--additional-results-paths', type=dir_path, nargs='+',
+                           help='paths from which recursively read .txt files with results (beside data/ directory)')
+    arg_parse.add_argument('--rename-additional-results-algorithms', type=str, nargs='+',
+                           help='names for algorithms additionally loaded (beside data/ directory)')
 
     args = arg_parse.parse_args()
 
     df = load_data_frame()
-    if args.gapso_logs_path:
-        append_logs_from_gapso(df, args.gapso_logs_path)
+    if args.additional_results_paths:
+        df = append_logs_online(df, args.additional_results_paths, args.rename_additional_results_algorithms)
 
     scores = calculate_scores(df)
     if not args.without_score_print:

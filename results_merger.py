@@ -6,6 +6,8 @@ import pandas as pd
 from pandas.core.dtypes.missing import array_equivalent
 from tabulate import tabulate
 
+from utils import dir_path
+
 
 def duplicate_columns(frame):
     """
@@ -59,13 +61,6 @@ def merge_results(from_paths, to_path):
 
     repeats_count = [[k, v] for k, v in sorted(repeats_count.items(), key=operator.itemgetter(1))]
     print(tabulate(repeats_count, headers=["Filename", "Count"]))
-
-
-def dir_path(path):
-    if os.path.isdir(path):
-        return path
-    else:
-        raise argparse.ArgumentTypeError(f"readable_dir: {path} is not a valid path")
 
 
 def main():
