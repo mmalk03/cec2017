@@ -21,12 +21,21 @@ def calculate_scores(df: pd.DataFrame):
     sum_of_ranks = df.query('function != "2"').query('evaluations == 1.00')
     sum_of_ranks = sum_of_ranks.groupby(['algorithm', 'dimensions', 'function'])['error'].mean()
     sum_of_ranks = sum_of_ranks.reset_index()
+
+    dims_ranks = sum_of_ranks.groupby(['algorithm', 'dimensions'])['error'].sum()
+    dims_ranks = dims_ranks.reset_index()
+    dims_ranks['rank'] = dims_ranks.groupby(['dimensions'])['error'].rank().astype(np.int32)
+    dims_ranks = dims_ranks.drop(columns=['error'])
+    dims_ranks = dims_ranks.pivot(index='algorithm', columns='dimensions')
+
     sum_of_ranks['rank'] = sum_of_ranks.groupby(['dimensions', 'function'])['error'].rank()
     sum_of_ranks = sum_of_ranks.groupby(['algorithm', 'dimensions'])['rank'].sum()
     sum_of_ranks = sum_of_ranks.groupby('algorithm').aggregate(lambda x: np.sum(x * [0.1, 0.2, 0.3, 0.4]))
     scores_2 = (1 - (sum_of_ranks - sum_of_ranks.min()) / sum_of_ranks) * 50
 
-    return scores_1 + scores_2
+    final_score = scores_1 + scores_2
+    final_score.name = "score"
+    return dims_ranks.join(final_score)
 
 
 def load_data_frame():
@@ -168,7 +177,7 @@ def main():
 
     scores = calculate_scores(df)
     if not args.without_score_print:
-        print(scores.sort_values(ascending=False))
+        print(scores.sort_values(by=['score'], ascending=False))
 
     if not args.without_plots:
         for function in tqdm(args.functions, position=0):
