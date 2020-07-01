@@ -179,6 +179,19 @@ def main():
     if not args.without_score_print:
         print(scores.sort_values(by=['score'], ascending=False))
 
+    if not args.without_score_print:
+        df['function'] = pd.to_numeric(df['function'])
+        functions = {
+            'unimodal': [1, 2],
+            'multidmodal': list(range(3, 10)),
+            'hybrid': list(range(10, 20)),
+            'composition': list(range(20, 30))
+        }
+        for function_type, function_names in functions.items():
+            scores = calculate_scores(df.query(f"function in {function_names}"))
+            print(f"Ranking for {function_type} functions:")
+            print(f"{scores.sort_values(by=['score'], ascending=False)}")
+
     if not args.without_plots:
         for function in tqdm(args.functions, position=0):
             for dimensions in tqdm(args.dimensions, position=1):
