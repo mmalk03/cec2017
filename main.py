@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 import re
 
@@ -94,7 +95,7 @@ def get_results_from_dir(path, paper_id):
     return results
 
 
-def plot_specific_comparison(df, function, dimensions, only_save=False, scores=None):
+def plot_specific_comparison(df, function, dimensions, only_save=False, scores=None, only_gapso=False, max_algorithms_per_ax=4):
     query = f"function == '{function}' and dimensions == '{dimensions}'"
     data = df.query(query)
 
@@ -108,6 +109,10 @@ def plot_specific_comparison(df, function, dimensions, only_save=False, scores=N
     gapso_algorithms = [algorithm for algorithm in algorithms if "gapso" in algorithm.lower()]
     other_algorithms = [algorithm for algorithm in algorithms if "gapso" not in algorithm.lower()]
 
+    if only_gapso:
+        algorithms = gapso_algorithms
+        other_algorithms = []
+
     palette = sns.color_palette(palette="Paired", n_colors=len(other_algorithms))
 
     other_algorithms_colors = {algorithm: palette[idx % ((len(other_algorithms) // 2) + 1) * 2  + (1 if idx > (len(other_algorithms) // 2) else 0)] for idx, algorithm in enumerate(other_algorithms)}
@@ -115,11 +120,16 @@ def plot_specific_comparison(df, function, dimensions, only_save=False, scores=N
 
     algorithms_colors = {**other_algorithms_colors, **gapso_algorithms_colors}
 
-    ncols = 2
-    fig, axs = plt.subplots(nrows=2, ncols=ncols, figsize=(6.4 * 1.5, 4.8 * 1.5))
-    axs = np.squeeze(np.reshape(axs, (1, -1)))
+    if len(algorithms) > max_algorithms_per_ax:
+        ncols = 2
+    else:
+        ncols = 1
 
-    for idx in range(ncols):
+    nrows = math.ceil(math.ceil(len(algorithms) / float(max_algorithms_per_ax)) / float(ncols))
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols, figsize=(6.4 * (1 + 0.5 * (ncols - 1)), 4.8 * (1 + 0.5 * (nrows - 1))))
+    axs = np.squeeze(np.reshape(axs, (1, -1)), axis=0)
+
+    for idx in range(axs.shape[0] - ncols):
         axs[idx].set_xticks([])
 
     max_error = data['error'].quantile(0.70)
@@ -130,11 +140,12 @@ def plot_specific_comparison(df, function, dimensions, only_save=False, scores=N
                      data=data[data["algorithm"].isin(algorithms_subset)],
                      ax=axs[idx],
                      palette=algorithms_colors,
-                     hue_order=algorithms_subset)
+                     hue_order=algorithms_subset,
+                     style='algorithm' if len(other_algorithms_colors) == 0 else None)
         # axs[idx].set_xlim(0.01, 0.1)
         axs[idx].set_ylim(min_error, max_error)
         axs[idx].legend(fontsize='x-small', loc=1)
-    fig.suptitle(query)
+    fig.suptitle(f"function {function}, dimension {dimensions}")
 
     directory = f"comparison/dim_{dimensions}"
     if not os.path.exists(directory):
@@ -192,6 +203,10 @@ def main():
                            action='store_true',
                            help='do not show plot, only save as .pdf',
                            default=False)
+    arg_parse.add_argument('--only-gapso',
+                           action='store_true',
+                           help='show only gapso algorithms',
+                           default=False)
     arg_parse.add_argument('--additional-results-paths', type=dir_path, nargs='+',
                            help='paths from which recursively read .txt files with results (beside data/ directory)')
     arg_parse.add_argument('--rename-additional-results-algorithms', type=str, nargs='+',
@@ -223,7 +238,7 @@ def main():
     if not args.without_plots:
         for function in tqdm(args.functions, position=0):
             for dimensions in tqdm(args.dimensions, position=1):
-                plot_specific_comparison(df, function, dimensions, only_save=args.only_save, scores=scores)
+                plot_specific_comparison(df, function, dimensions, only_save=args.only_save, scores=scores, only_gapso=args.only_gapso)
 
     # plot_overall_comparison(df)
 
