@@ -149,6 +149,158 @@ def plot_specific_comparison(df, function, dimensions, only_save=False, scores=N
     plt.close()
 
 
+def plot_per_dim_comparison(df, dimensions, only_save=False, scores=None, only_gapso=False, max_algorithms_per_ax=4, omit_worse=False):
+    query = f"dimensions == '{dimensions}'"
+    data = df.query(query)
+
+    if scores is not None:
+        algorithms = scores.sort_values(ascending=False).index.tolist()
+    else:
+        algorithms = data['algorithm'].unique().tolist()
+
+    worse_algorithms = []
+    if omit_worse:
+        gapso_score = scores['M-GAPSO']
+        worse_algorithms = scores[scores < gapso_score].index.tolist()
+        algorithms = [algorithm for algorithm in algorithms if algorithm not in worse_algorithms]
+
+    algorithms += list(set(data['algorithm'].unique()) - set(algorithms) - set(worse_algorithms))
+
+    gapso_algorithms = [algorithm for algorithm in algorithms if "gapso" in algorithm.lower()]
+    other_algorithms = [algorithm for algorithm in algorithms if "gapso" not in algorithm.lower()]
+
+    if only_gapso:
+        algorithms = gapso_algorithms
+        other_algorithms = []
+
+    palette = sns.color_palette(palette="Paired", n_colors=len(other_algorithms))
+
+    other_algorithms_colors = {algorithm: palette[
+        idx % math.ceil(len(other_algorithms) / 2) * 2 + (1 if idx > (len(other_algorithms) // 2) else 0)] for
+                               idx, algorithm in enumerate(other_algorithms)}
+    gapso_algorithms_colors = {algorithm: (
+    idx * 1. / len(gapso_algorithms), idx * 1.0 / len(gapso_algorithms), idx * 1.0 / len(gapso_algorithms)) for
+                               idx, algorithm in enumerate(gapso_algorithms)}
+
+    algorithms_colors = {**other_algorithms_colors, **gapso_algorithms_colors}
+
+    if len(algorithms) > max_algorithms_per_ax:
+        ncols = 2
+    else:
+        ncols = 1
+
+    nrows = math.ceil(math.ceil(len(algorithms) / float(max_algorithms_per_ax)) / float(ncols))
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols,
+                            figsize=(6.4 * (1 + 0.5 * (ncols - 1)), 4.8 * (1 + 0.5 * (nrows - 1))))
+    axs = np.squeeze(np.reshape(axs, (1, -1)), axis=0)
+
+    for idx in range(axs.shape[0] - ncols):
+        axs[idx].set_xticks([])
+
+    data = data.groupby(['evaluations', 'algorithm', 'function']).agg({'error': 'mean'}).reset_index()
+    data = data.groupby(['evaluations', 'algorithm']).agg({'error': 'mean'}).reset_index()
+
+    max_error = float(data[data['evaluations'] == 0.9].groupby('algorithm')['error'].mean().quantile(0.5, interpolation='linear'))
+    min_error = float(data['error'].min())
+    for idx, other_algorithms_subset in enumerate(np.array_split(other_algorithms, len(axs))):
+        algorithms_subset = gapso_algorithms + other_algorithms_subset.tolist()
+        sns.lineplot('evaluations', 'error', hue='algorithm',
+                     data=data[data["algorithm"].isin(algorithms_subset)],
+                     ax=axs[idx],
+                     palette=algorithms_colors,
+                     hue_order=algorithms_subset,
+                     style='algorithm' if len(other_algorithms_colors) == 0 else None)
+        axs[idx].set_ylim(min_error, max_error)
+        axs[idx].legend(fontsize='x-small', loc=1)
+    fig.suptitle(f"dimension {dimensions}")
+
+    directory = f"comparison_per_dim"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    plt.savefig(os.path.join(directory, f'dim_{dimensions}.pdf'), dpi=300)
+
+    if not only_save:
+        plt.show()
+
+    plt.close()
+
+
+def plot_per_fun_comparison(df, function, only_save=False, scores=None, only_gapso=False, max_algorithms_per_ax=4, omit_worse=False):
+    query = f"function == '{function}'"
+    data = df.query(query)
+
+    if scores is not None:
+        algorithms = scores.sort_values(ascending=False).index.tolist()
+    else:
+        algorithms = data['algorithm'].unique().tolist()
+
+    worse_algorithms = []
+    if omit_worse:
+        gapso_score = scores['M-GAPSO']
+        worse_algorithms = scores[scores < gapso_score].index.tolist()
+        algorithms = [algorithm for algorithm in algorithms if algorithm not in worse_algorithms]
+
+    algorithms += list(set(data['algorithm'].unique()) - set(algorithms) - set(worse_algorithms))
+
+    gapso_algorithms = [algorithm for algorithm in algorithms if "gapso" in algorithm.lower()]
+    other_algorithms = [algorithm for algorithm in algorithms if "gapso" not in algorithm.lower()]
+
+    if only_gapso:
+        algorithms = gapso_algorithms
+        other_algorithms = []
+
+    palette = sns.color_palette(palette="Paired", n_colors=len(other_algorithms))
+
+    other_algorithms_colors = {algorithm: palette[
+        idx % math.ceil(len(other_algorithms) / 2) * 2 + (1 if idx > (len(other_algorithms) // 2) else 0)] for
+                               idx, algorithm in enumerate(other_algorithms)}
+    gapso_algorithms_colors = {algorithm: (
+    idx * 1. / len(gapso_algorithms), idx * 1.0 / len(gapso_algorithms), idx * 1.0 / len(gapso_algorithms)) for
+                               idx, algorithm in enumerate(gapso_algorithms)}
+
+    algorithms_colors = {**other_algorithms_colors, **gapso_algorithms_colors}
+
+    if len(algorithms) > max_algorithms_per_ax:
+        ncols = 2
+    else:
+        ncols = 1
+
+    nrows = math.ceil(math.ceil(len(algorithms) / float(max_algorithms_per_ax)) / float(ncols))
+    fig, axs = plt.subplots(nrows=nrows, ncols=ncols,
+                            figsize=(6.4 * (1 + 0.5 * (ncols - 1)), 4.8 * (1 + 0.5 * (nrows - 1))))
+    axs = np.squeeze(np.reshape(axs, (1, -1)), axis=0)
+
+    for idx in range(axs.shape[0] - ncols):
+        axs[idx].set_xticks([])
+
+    data = data.groupby(['evaluations', 'algorithm', 'dimensions']).agg({'error': 'mean'}).reset_index()
+    data = data.groupby(['evaluations', 'algorithm']).agg({'error': 'mean'}).reset_index()
+
+    max_error = float(data[data['evaluations'] == 0.9].groupby('algorithm')['error'].mean().quantile(0.5, interpolation='linear'))
+    min_error = float(data['error'].min())
+    for idx, other_algorithms_subset in enumerate(np.array_split(other_algorithms, len(axs))):
+        algorithms_subset = gapso_algorithms + other_algorithms_subset.tolist()
+        sns.lineplot('evaluations', 'error', hue='algorithm',
+                     data=data[data["algorithm"].isin(algorithms_subset)],
+                     ax=axs[idx],
+                     palette=algorithms_colors,
+                     hue_order=algorithms_subset,
+                     style='algorithm' if len(other_algorithms_colors) == 0 else None)
+        axs[idx].set_ylim(min_error, max_error)
+        axs[idx].legend(fontsize='x-small', loc=1)
+    fig.suptitle(f"function {function}")
+
+    directory = f"comparison_per_function"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    plt.savefig(os.path.join(directory, f'fun_{function}.pdf'), dpi=300)
+
+    if not only_save:
+        plt.show()
+
+    plt.close()
+
+
 def plot_overall_comparison(df):
     g = sns.FacetGrid(df, row='function', col='dimensions', hue='algorithm')
     g.map(sns.lineplot, 'evaluations', 'error')
@@ -186,9 +338,21 @@ def main():
                            action='store_true',
                            help='do not print overall score',
                            default=False)
-    arg_parse.add_argument('--without-plots',
+    arg_parse.add_argument('--with-specific-comparison',
                            action='store_true',
-                           help='do not save or show any plot',
+                           help='save and show specific comparison plots',
+                           default=False)
+    arg_parse.add_argument('--with-per-dim-comparison',
+                           action='store_true',
+                           help='save and show per dim comparison plots',
+                           default=False)
+    arg_parse.add_argument('--with-per-fun-comparison',
+                           action='store_true',
+                           help='save and show per fun comparison plots',
+                           default=False)
+    arg_parse.add_argument('--omit-worse',
+                           action='store_true',
+                           help='in plots omit algorithms which are worse than GAPSO',
                            default=False)
     arg_parse.add_argument('--only-save',
                            action='store_true',
@@ -213,10 +377,18 @@ def main():
     if not args.without_score_print:
         print(scores.sort_values(ascending=False))
 
-    if not args.without_plots:
+    if args.with_specific_comparison:
         for function in tqdm(args.functions, position=0):
             for dimensions in tqdm(args.dimensions, position=1):
                 plot_specific_comparison(df, function, dimensions, only_save=args.only_save, scores=scores, only_gapso=args.only_gapso)
+
+    if args.with_per_dim_comparison:
+        for dimensions in tqdm(args.dimensions):
+            plot_per_dim_comparison(df, dimensions, only_save=args.only_save, scores=scores, only_gapso=args.only_gapso, omit_worse=args.omit_worse)
+
+    if args.with_per_fun_comparison:
+        for function in tqdm(args.functions):
+            plot_per_fun_comparison(df, function, only_save=args.only_save, scores=scores, only_gapso=args.only_gapso, omit_worse=args.omit_worse)
 
     # plot_overall_comparison(df)
 
