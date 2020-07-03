@@ -53,8 +53,8 @@ def merge_results(from_paths, to_path):
 
         df_local = pd.concat([pd.read_csv(str(path), sep=r"\s+", header=None) for path in paths], axis=1)
 
-        duplicates = duplicate_columns(df_local)
-        df_local = df_local.drop(duplicates, axis=1)
+        # duplicates = duplicate_columns(df_local)
+        # df_local = df_local.drop(duplicates, axis=1)
 
         df_local.to_csv(os.path.join(to_path, filename), header=False, index=False, sep="\t")
         repeats_count[filename] = df_local.shape[1]
